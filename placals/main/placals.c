@@ -458,17 +458,13 @@ esp_err_t mcp23017_init(mcp23017_t *dev, uint8_t address, uint32_t scl_speed_hz)
         .scl_speed_hz = scl_speed_hz
     };
 
-    esp_err_t err = TwoWire_add_device(
-        &dev->handle,
-        &cfg
-    );
 
-    if (err != ESP_OK) {
-        return err;
+    if (!TwoWire_add_device(&dev->handle, &cfg)) {
+        return ESP_ERR_INVALID_RESPONSE;
     }
 
     dev->address = address;
-    err = write_reg(dev, REG_IOCON, 0x00);
+    esp_err_t err = write_reg(dev, REG_IOCON, 0x00);
 
     if (err != ESP_OK) {
         goto fail;
