@@ -1095,45 +1095,45 @@ void app_main(void){
     vTaskDelay(pdMS_TO_TICKS(500));
     bool gpa_level = false;
 
-    err = ds3231_init(&rtc, DS3231_DEFAULT_ADDR, 100000);
+    // err = ds3231_init(&rtc, DS3231_DEFAULT_ADDR, 100000);
 
-    if(err != ESP_OK){
-        printf("[-] DS3231 initialization failed: %s\n",
-               esp_err_to_name(err));
-        return;
-    }
+    // if(err != ESP_OK){
+    //     printf("[-] DS3231 initialization failed: %s\n",
+    //            esp_err_to_name(err));
+    //     return;
+    // }
 
-    bool stopped;
-    err = ds3231_oscillator_stopped(&rtc, &stopped);
+    // bool stopped;
+    // err = ds3231_oscillator_stopped(&rtc, &stopped);
 
-    if(err != ESP_OK){
-        printf("[-] Failed to read oscillator status: %s\n", esp_err_to_name(err));
-    } 
+    // if(err != ESP_OK){
+    //     printf("[-] Failed to read oscillator status: %s\n", esp_err_to_name(err));
+    // } 
     
-    else if(stopped){
-        printf("[!] RTC oscillator stopped; time may be invalid\n");
-    }
+    // else if(stopped){
+    //     printf("[!] RTC oscillator stopped; time may be invalid\n");
+    // }
 
     for(;;){
-        ds3231_datetime_t datetime;
-        err = ds3231_get_datetime(&rtc, &datetime);
+        // ds3231_datetime_t datetime;
+        // err = ds3231_get_datetime(&rtc, &datetime);
 
-        if(err == ESP_OK){
-            printf(
-                "%04u-%02u-%02u %02u:%02u:%02u | Weekday: %u\n",
-                (unsigned)datetime.year,
-                (unsigned)datetime.month,
-                (unsigned)datetime.day,
-                (unsigned)datetime.hour,
-                (unsigned)datetime.minute,
-                (unsigned)datetime.second,
-                (unsigned)datetime.weekday
-            );
-        } 
+        // if(err == ESP_OK){
+        //     printf(
+        //         "%04u-%02u-%02u %02u:%02u:%02u | Weekday: %u\n",
+        //         (unsigned)datetime.year,
+        //         (unsigned)datetime.month,
+        //         (unsigned)datetime.day,
+        //         (unsigned)datetime.hour,
+        //         (unsigned)datetime.minute,
+        //         (unsigned)datetime.second,
+        //         (unsigned)datetime.weekday
+        //     );
+        // } 
         
-        else {
-            printf("[-] RTC read error: %s\n", esp_err_to_name(err));
-        }
+        // else {
+        //     printf("[-] RTC read error: %s\n", esp_err_to_name(err));
+        // }
 
         print_all_inputs();
 
