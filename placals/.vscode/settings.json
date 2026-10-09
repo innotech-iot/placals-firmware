@@ -1,0 +1,5 @@
+{
+    "idf.currentSetup": "/home/ton618/esp/esp-idf",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "editor.suggest.selectionMode": "never"
+}

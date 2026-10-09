@@ -1,0 +1,2 @@
+source /home/ton618/placals-firmware/placals/build/bootloader/gdbinit/symbols
+source /home/ton618/placals-firmware/placals/build/bootloader/gdbinit/connect
