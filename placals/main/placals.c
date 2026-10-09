@@ -1135,16 +1135,16 @@ void app_main(void){
 
         print_all_inputs();
 
-        for(int i = 0; i < MCP_RESET; i++){
-            if(input_is_activate(i)){
-                output_activate(i);
-            }
+        // for(int i = 0; i < MCP_RESET; i++){
+        //     if(input_is_activate(i)){
+        //         output_activate(i);
+        //     }
 
-            else {
-                output_deactivate(i);
-            }
+        //     else {
+        //         output_deactivate(i);
+        //     }
 
-        }
+        // }
         
         vTaskDelay(pdMS_TO_TICKS(100));
         mcp23017_toggle_gpa(gpa_level);
