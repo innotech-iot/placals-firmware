@@ -715,344 +715,344 @@ void mcp23017_toggle_gpa(bool level){
 
 /** ======================================< DS3231 >====================================== */
 
-#define DS3231_DEFAULT_ADDR  0x68
-
-#define REG_SECONDS      0x00
-#define REG_CONTROL      0x0E
-#define REG_STATUS       0x0F
-#define REG_TEMP_MSB     0x11
-
-#define STATUS_OSF       (1U << 7)
-
-#define DS3231_TIMEOUT_MS 100
-
-static bool valid_device(const ds3231_t *dev)
-{
-    return dev != NULL && dev->initialized;
-}
-
-static uint8_t bin_to_bcd(uint8_t value)
-{
-    return (uint8_t)(((value / 10U) << 4) | (value % 10U));
-}
-
-static uint8_t bcd_to_bin(uint8_t value)
-{
-    return (uint8_t)(((value >> 4) * 10U) + (value & 0x0FU));
-}
-
-static esp_err_t ds3231_write_reg(
-    ds3231_t *dev,
-    uint8_t reg,
-    uint8_t value
-)
-{
-    uint8_t tx[2] = {
-        reg,
-        value
-    };
-
-    return TwoWire_transmit(
-        dev->handle,
-        tx,
-        sizeof(tx),
-        DS3231_TIMEOUT_MS
-    );
-}
-
-static esp_err_t read_regs(
-    ds3231_t *dev,
-    uint8_t reg,
-    uint8_t *buffer,
-    size_t length
-)
-{
-    if (buffer == NULL || length == 0) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    return TwoWire_transmit_receive(
-        dev->handle,
-        &reg,
-        sizeof(reg),
-        buffer,
-        length,
-        DS3231_TIMEOUT_MS
-    );
-}
-
-/* ============================================================
- * Inicialização
- * ============================================================ */
-
-esp_err_t ds3231_init(
-    ds3231_t *dev,
-    uint8_t address,
-    uint32_t scl_speed_hz
-)
-{
-    if (dev == NULL ||
-        address > 0x7F ||
-        scl_speed_hz == 0) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    memset(dev, 0, sizeof(*dev));
-
-    i2c_device_config_t cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = address,
-        .scl_speed_hz = scl_speed_hz
-    };
-
-    esp_err_t err = TwoWire_add_device(
-        &dev->handle,
-        &cfg
-    );
-
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    dev->address = address;
-    dev->initialized = true;
-
-    /*
-     * Não altera a hora, os alarmes ou os registradores
-     * de controle durante a inicialização.
-     */
-
-    return ESP_OK;
-}
-
-/* ============================================================
- * Finalização
- * ============================================================ */
-
-esp_err_t ds3231_deinit(ds3231_t *dev)
-{
-    if (!valid_device(dev)) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    esp_err_t err = TwoWire_remove_device(dev->handle);
-
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    memset(dev, 0, sizeof(*dev));
-
-    return ESP_OK;
-}
-
-/* ============================================================
- * Leitura de data e hora
- * ============================================================ */
-
-esp_err_t ds3231_get_datetime(
-    ds3231_t *dev,
-    ds3231_datetime_t *datetime
-)
-{
-    if (!valid_device(dev) || datetime == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    uint8_t reg[7];
-
-    esp_err_t err = read_regs(
-        dev,
-        REG_SECONDS,
-        reg,
-        sizeof(reg)
-    );
-
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    /* Segundos: bit 7 indica CH em outros RTCs,
-       mas no DS3231 os bits de segundos são BCD. */
-    datetime->second = bcd_to_bin(reg[0] & 0x7F);
-    datetime->minute = bcd_to_bin(reg[1] & 0x7F);
-
-    /* O registrador de horas pode estar em modo 12 h ou 24 h. */
-    if (reg[2] & (1U << 6)) {
-        uint8_t hour = bcd_to_bin(reg[2] & 0x1F);
-        bool pm = (reg[2] & (1U << 5)) != 0;
-
-        /* Converte de 12 h para 24 h. */
-        datetime->hour = (uint8_t)(
-            (hour % 12U) + (pm ? 12U : 0U)
-        );
-    } else {
-        datetime->hour = bcd_to_bin(reg[2] & 0x3F);
-    }
-
-    datetime->weekday = bcd_to_bin(reg[3] & 0x07);
-    datetime->day = bcd_to_bin(reg[4] & 0x3F);
-
-    datetime->month = bcd_to_bin(reg[5] & 0x1F);
-    datetime->year = (uint16_t)(2000U + bcd_to_bin(reg[6]));
-
-    if (reg[5] & (1U << 7)) {
-        datetime->year += 100U;
-    }
-
-    return ESP_OK;
-}
-
-/* ============================================================
- * Ajuste de data e hora
- * ============================================================ */
-
-esp_err_t ds3231_set_datetime(
-    ds3231_t *dev,
-    const ds3231_datetime_t *datetime
-)
-{
-    if (!valid_device(dev) || datetime == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if (datetime->year < 2000 || datetime->year > 2199 ||
-        datetime->month < 1 || datetime->month > 12 ||
-        datetime->day < 1 || datetime->day > 31 ||
-        datetime->weekday < 1 || datetime->weekday > 7 ||
-        datetime->hour > 23 ||
-        datetime->minute > 59 ||
-        datetime->second > 59) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    uint8_t tx[8] = {
-        REG_SECONDS,
-        bin_to_bcd(datetime->second),
-        bin_to_bcd(datetime->minute),
-        bin_to_bcd(datetime->hour),
-        bin_to_bcd(datetime->weekday),
-        bin_to_bcd(datetime->day),
-        (uint8_t)(
-            bin_to_bcd(datetime->month) |
-            (datetime->year >= 2100 ? 0x80 : 0x00)
-        ),
-        bin_to_bcd((uint8_t)(datetime->year % 100))
-    };
-
-    return TwoWire_transmit(
-        dev->handle,
-        tx,
-        sizeof(tx),
-        DS3231_TIMEOUT_MS
-    );
-}
-
-/* ============================================================
- * Temperatura
- * ============================================================ */
-
-esp_err_t ds3231_get_temperature(
-    ds3231_t *dev,
-    float *temperature
-)
-{
-    if (!valid_device(dev) || temperature == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    uint8_t reg[2];
-
-    esp_err_t err = read_regs(
-        dev,
-        REG_TEMP_MSB,
-        reg,
-        sizeof(reg)
-    );
-
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    int8_t integer = (int8_t)reg[0];
-    uint8_t fraction = (reg[1] >> 6) & 0x03;
-
-    *temperature = (float)integer + ((float)fraction * 0.25f);
-
-    return ESP_OK;
-}
-
-/* ============================================================
- * Oscillator Stop Flag
- * ============================================================ */
-
-esp_err_t ds3231_oscillator_stopped(
-    ds3231_t *dev,
-    bool *stopped
-)
-{
-    if (!valid_device(dev) || stopped == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    uint8_t status;
-
-    esp_err_t err = read_regs(
-        dev,
-        REG_STATUS,
-        &status,
-        sizeof(status)
-    );
-
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    *stopped = (status & STATUS_OSF) != 0;
-
-    return ESP_OK;
-}
-
-esp_err_t ds3231_clear_oscillator_flag(ds3231_t *dev){
-    if (!valid_device(dev)) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    uint8_t status;
-
-    esp_err_t err = read_regs(
-        dev,
-        REG_STATUS,
-        &status,
-        sizeof(status)
-    );
-
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    status &= (uint8_t)~STATUS_OSF;
-
-    return ds3231_write_reg(dev, REG_STATUS, status);
-}
-
-typedef struct {
-    uint16_t year;       /* 2000–2199 */
-    uint8_t month;       /* 1–12 */
-    uint8_t day;         /* 1–31 */
-    uint8_t weekday;     /* 1–7 */
-    uint8_t hour;        /* 0–23 */
-    uint8_t minute;      /* 0–59 */
-    uint8_t second;      /* 0–59 */
-} ds3231_datetime_t;
-
-typedef struct {
-    i2c_master_dev_handle_t handle;
-    uint8_t address;
-    bool initialized;
-} ds3231_t;
-
-ds3231_t rtc = { 0 };
+// #define DS3231_DEFAULT_ADDR  0x68
+
+// #define REG_SECONDS      0x00
+// #define REG_CONTROL      0x0E
+// #define REG_STATUS       0x0F
+// #define REG_TEMP_MSB     0x11
+
+// #define STATUS_OSF       (1U << 7)
+
+// #define DS3231_TIMEOUT_MS 100
+
+// static bool valid_device(const ds3231_t *dev)
+// {
+//     return dev != NULL && dev->initialized;
+// }
+
+// static uint8_t bin_to_bcd(uint8_t value)
+// {
+//     return (uint8_t)(((value / 10U) << 4) | (value % 10U));
+// }
+
+// static uint8_t bcd_to_bin(uint8_t value)
+// {
+//     return (uint8_t)(((value >> 4) * 10U) + (value & 0x0FU));
+// }
+
+// static esp_err_t ds3231_write_reg(
+//     ds3231_t *dev,
+//     uint8_t reg,
+//     uint8_t value
+// )
+// {
+//     uint8_t tx[2] = {
+//         reg,
+//         value
+//     };
+
+//     return TwoWire_transmit(
+//         dev->handle,
+//         tx,
+//         sizeof(tx),
+//         DS3231_TIMEOUT_MS
+//     );
+// }
+
+// static esp_err_t read_regs(
+//     ds3231_t *dev,
+//     uint8_t reg,
+//     uint8_t *buffer,
+//     size_t length
+// )
+// {
+//     if (buffer == NULL || length == 0) {
+//         return ESP_ERR_INVALID_ARG;
+//     }
+
+//     return TwoWire_transmit_receive(
+//         dev->handle,
+//         &reg,
+//         sizeof(reg),
+//         buffer,
+//         length,
+//         DS3231_TIMEOUT_MS
+//     );
+// }
+
+// /* ============================================================
+//  * Inicialização
+//  * ============================================================ */
+
+// esp_err_t ds3231_init(
+//     ds3231_t *dev,
+//     uint8_t address,
+//     uint32_t scl_speed_hz
+// )
+// {
+//     if (dev == NULL ||
+//         address > 0x7F ||
+//         scl_speed_hz == 0) {
+//         return ESP_ERR_INVALID_ARG;
+//     }
+
+//     memset(dev, 0, sizeof(*dev));
+
+//     i2c_device_config_t cfg = {
+//         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+//         .device_address = address,
+//         .scl_speed_hz = scl_speed_hz
+//     };
+
+//     esp_err_t err = TwoWire_add_device(
+//         &dev->handle,
+//         &cfg
+//     );
+
+//     if (err != ESP_OK) {
+//         return err;
+//     }
+
+//     dev->address = address;
+//     dev->initialized = true;
+
+//     /*
+//      * Não altera a hora, os alarmes ou os registradores
+//      * de controle durante a inicialização.
+//      */
+
+//     return ESP_OK;
+// }
+
+// /* ============================================================
+//  * Finalização
+//  * ============================================================ */
+
+// esp_err_t ds3231_deinit(ds3231_t *dev)
+// {
+//     if (!valid_device(dev)) {
+//         return ESP_ERR_INVALID_ARG;
+//     }
+
+//     esp_err_t err = TwoWire_remove_device(dev->handle);
+
+//     if (err != ESP_OK) {
+//         return err;
+//     }
+
+//     memset(dev, 0, sizeof(*dev));
+
+//     return ESP_OK;
+// }
+
+// /* ============================================================
+//  * Leitura de data e hora
+//  * ============================================================ */
+
+// esp_err_t ds3231_get_datetime(
+//     ds3231_t *dev,
+//     ds3231_datetime_t *datetime
+// )
+// {
+//     if (!valid_device(dev) || datetime == NULL) {
+//         return ESP_ERR_INVALID_ARG;
+//     }
+
+//     uint8_t reg[7];
+
+//     esp_err_t err = read_regs(
+//         dev,
+//         REG_SECONDS,
+//         reg,
+//         sizeof(reg)
+//     );
+
+//     if (err != ESP_OK) {
+//         return err;
+//     }
+
+//     /* Segundos: bit 7 indica CH em outros RTCs,
+//        mas no DS3231 os bits de segundos são BCD. */
+//     datetime->second = bcd_to_bin(reg[0] & 0x7F);
+//     datetime->minute = bcd_to_bin(reg[1] & 0x7F);
+
+//     /* O registrador de horas pode estar em modo 12 h ou 24 h. */
+//     if (reg[2] & (1U << 6)) {
+//         uint8_t hour = bcd_to_bin(reg[2] & 0x1F);
+//         bool pm = (reg[2] & (1U << 5)) != 0;
+
+//         /* Converte de 12 h para 24 h. */
+//         datetime->hour = (uint8_t)(
+//             (hour % 12U) + (pm ? 12U : 0U)
+//         );
+//     } else {
+//         datetime->hour = bcd_to_bin(reg[2] & 0x3F);
+//     }
+
+//     datetime->weekday = bcd_to_bin(reg[3] & 0x07);
+//     datetime->day = bcd_to_bin(reg[4] & 0x3F);
+
+//     datetime->month = bcd_to_bin(reg[5] & 0x1F);
+//     datetime->year = (uint16_t)(2000U + bcd_to_bin(reg[6]));
+
+//     if (reg[5] & (1U << 7)) {
+//         datetime->year += 100U;
+//     }
+
+//     return ESP_OK;
+// }
+
+// /* ============================================================
+//  * Ajuste de data e hora
+//  * ============================================================ */
+
+// esp_err_t ds3231_set_datetime(
+//     ds3231_t *dev,
+//     const ds3231_datetime_t *datetime
+// )
+// {
+//     if (!valid_device(dev) || datetime == NULL) {
+//         return ESP_ERR_INVALID_ARG;
+//     }
+
+//     if (datetime->year < 2000 || datetime->year > 2199 ||
+//         datetime->month < 1 || datetime->month > 12 ||
+//         datetime->day < 1 || datetime->day > 31 ||
+//         datetime->weekday < 1 || datetime->weekday > 7 ||
+//         datetime->hour > 23 ||
+//         datetime->minute > 59 ||
+//         datetime->second > 59) {
+//         return ESP_ERR_INVALID_ARG;
+//     }
+
+//     uint8_t tx[8] = {
+//         REG_SECONDS,
+//         bin_to_bcd(datetime->second),
+//         bin_to_bcd(datetime->minute),
+//         bin_to_bcd(datetime->hour),
+//         bin_to_bcd(datetime->weekday),
+//         bin_to_bcd(datetime->day),
+//         (uint8_t)(
+//             bin_to_bcd(datetime->month) |
+//             (datetime->year >= 2100 ? 0x80 : 0x00)
+//         ),
+//         bin_to_bcd((uint8_t)(datetime->year % 100))
+//     };
+
+//     return TwoWire_transmit(
+//         dev->handle,
+//         tx,
+//         sizeof(tx),
+//         DS3231_TIMEOUT_MS
+//     );
+// }
+
+// /* ============================================================
+//  * Temperatura
+//  * ============================================================ */
+
+// esp_err_t ds3231_get_temperature(
+//     ds3231_t *dev,
+//     float *temperature
+// )
+// {
+//     if (!valid_device(dev) || temperature == NULL) {
+//         return ESP_ERR_INVALID_ARG;
+//     }
+
+//     uint8_t reg[2];
+
+//     esp_err_t err = read_regs(
+//         dev,
+//         REG_TEMP_MSB,
+//         reg,
+//         sizeof(reg)
+//     );
+
+//     if (err != ESP_OK) {
+//         return err;
+//     }
+
+//     int8_t integer = (int8_t)reg[0];
+//     uint8_t fraction = (reg[1] >> 6) & 0x03;
+
+//     *temperature = (float)integer + ((float)fraction * 0.25f);
+
+//     return ESP_OK;
+// }
+
+// /* ============================================================
+//  * Oscillator Stop Flag
+//  * ============================================================ */
+
+// esp_err_t ds3231_oscillator_stopped(
+//     ds3231_t *dev,
+//     bool *stopped
+// )
+// {
+//     if (!valid_device(dev) || stopped == NULL) {
+//         return ESP_ERR_INVALID_ARG;
+//     }
+
+//     uint8_t status;
+
+//     esp_err_t err = read_regs(
+//         dev,
+//         REG_STATUS,
+//         &status,
+//         sizeof(status)
+//     );
+
+//     if (err != ESP_OK) {
+//         return err;
+//     }
+
+//     *stopped = (status & STATUS_OSF) != 0;
+
+//     return ESP_OK;
+// }
+
+// esp_err_t ds3231_clear_oscillator_flag(ds3231_t *dev){
+//     if (!valid_device(dev)) {
+//         return ESP_ERR_INVALID_ARG;
+//     }
+
+//     uint8_t status;
+
+//     esp_err_t err = read_regs(
+//         dev,
+//         REG_STATUS,
+//         &status,
+//         sizeof(status)
+//     );
+
+//     if (err != ESP_OK) {
+//         return err;
+//     }
+
+//     status &= (uint8_t)~STATUS_OSF;
+
+//     return ds3231_write_reg(dev, REG_STATUS, status);
+// }
+
+// typedef struct {
+//     uint16_t year;       /* 2000–2199 */
+//     uint8_t month;       /* 1–12 */
+//     uint8_t day;         /* 1–31 */
+//     uint8_t weekday;     /* 1–7 */
+//     uint8_t hour;        /* 0–23 */
+//     uint8_t minute;      /* 0–59 */
+//     uint8_t second;      /* 0–59 */
+// } ds3231_datetime_t;
+
+// typedef struct {
+//     i2c_master_dev_handle_t handle;
+//     uint8_t address;
+//     bool initialized;
+// } ds3231_t;
+
+// ds3231_t rtc = { 0 };
 
 void app_main(void){
     init_inputs();
