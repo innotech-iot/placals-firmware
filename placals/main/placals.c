@@ -86,6 +86,8 @@ void init_outputs(){
         outputs[i].gpio = outputs_gpio[i];
         outputs[i].activate = i != MCP_RESET ? ACTIVATE_IN_HIGH : ACTIVATE_IN_LOW;
     }
+
+    gpio_set_level(outputs[MCP_RESET].gpio, 1);
 }
 
 bool gpio_state(gpio_num_t gpio){
@@ -1137,7 +1139,7 @@ void app_main(void){
 
         print_all_inputs();
 
-        for(int i = 0; i < OUTPUTS_PIN_COUNT; i++){
+        for(int i = 0; i < MCP_RESET; i++){
             if(input_is_activate(i)){
                 output_activate(i);
             }
